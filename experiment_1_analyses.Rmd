@@ -1,0 +1,279 @@
+---
+title: "experiment_1_analyses"
+author: "Steve Schwering"
+date: "6/17/2020"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(lme4)
+```
+
+```{r}
+# Set your directory where the data is...
+setwd("~/Documents/Psychology/Labs/LCNL/Research/current/emotion_fiction/paper/data_analyses/experiment_1")
+d_data_wide = read_csv('experiment_1_data.csv')
+d_demographics = read_csv('experiment_1_demographics.csv') %>%
+  rename(participant = id) %>%
+  mutate(participant = as.factor(participant))
+```
+
+## Formatting data
+
+As we can see, the data is in a strange format...
+
+```{r}
+sample_n(d_data_wide, 10)
+```
+
+We are going to clean up this dataframe so that it is in a tidy format. First, we want to start by identifying our simple and complex emotions.
+
+```{r}
+simple_emotions = c('anger',
+                    'joy',
+                    'surprise',
+                    'disgust',
+                    'sadness',
+                    'fear')
+
+complex_emotions = c('amusement',
+                     'despair',
+                     'relief',
+                     'anxiety',
+                     'pleasure',
+                     'irritation',
+                     'interest',
+                     'pride')
+```
+
+We also want to a moment to inspect the dataframe. We note that there are three problematic participants: one that is missing both an ID number and an ART score and two participants that are missing ART scores (ID numbers: 125 and 141). We need ART scores for these analyses, so these participants will be dropped. Imputing the scores could be possible, but at the time of my initial analysis of the data, I was not familiar with this technique. 
+
+Based on my inspection of the raw(est) data files (not provided here), there was some problem noted with each participant's data by a research assistant, though there was no further explication. Given this problem, I decided to exclude the incomplete cases from analysis prior to further inspection.
+
+
+```{r}
+d = d_data_wide %>%
+  # First transorm and remove incomplete cases
+  gather(key = 'emotion', value = 'correct_recognized', Amusement_1:Surprise_30, -participant) %>%
+  # We only care about complete cases
+  # -- One participant is missing both an ID number and an ART score
+  # -- Two participants (125 and 141) are missing ART scores
+  filter(complete.cases(.)) %>%
+  # Score emotion responses
+  mutate(correct_recognized = recode(correct_recognized, "On" = 1, "Off" = 0),
+         participant_GERT = ave(correct_recognized, participant)) %>%
+  # Mutations:
+  #-- Make ID numbers into a factor
+  # -- Collapse emotions into category labels
+  # -- Collapse emotions into complexity
+  # -- Factorize emotions
+  # -- Transform and center ART scores
+  mutate(participant = as.factor(participant),
+         emotion_video = as.factor(emotion),
+         emotion_group = tolower(str_extract(emotion, "[a-zA-Z]*")),
+         emotion_type = ifelse(emotion_group %in% simple_emotions, -0.5, 0.5),
+         emotion_type_f = as.factor(ifelse(emotion_group %in% simple_emotions, "Simple", "Complex")),
+         emotion_type_f = factor(emotion_type_f, levels = c("Simple", "Complex")),
+         trans_ART = sqrt(ART),
+         cent_trans_ART = trans_ART - ave(trans_ART)) %>%
+  left_join(d_demographics, by = 'participant') %>%
+  mutate(gender = recode(gender, "Female" = "female", "Male" = "male"),
+         gender_num = recode(gender, "female" = -0.5, "male" = 0.5))
+```
+
+Now we can see that this is much cleaner.
+
+```{r}
+sample_n(d, 10)
+```
+
+## Demographics data
+
+Let's get all of the participant ID numbers and see if we can combine the demographics data with the experimental data. These data were stored in separate files, so we want to double check if there are any errors. First, I am going to see what ID numbers are in the demographics data but not in the experimental data. The following code should print those ID numbers:
+
+```{r}
+ids = d %>%
+  select(participant) %>%
+  unique() %>%
+  .$participant
+
+d_demographics %>%
+  filter(!participant %in% ids) %>%
+  select(participant) %>%
+  unique() %>%
+  .$participant
+
+rm(ids)
+```
+
+We are missing very low ID numbers (3, 4, 5, 6, 7, 8, 9) as well as some higher ID numbers (101, 125, 141, and 150) from the experimental data. The low numbers come from pilot data. Two of the higher ID numbers are from our removal of missing cases from the experimental data (i.e. 125 and 141). One of these participants (141) is also missing also demographics information, and the other (125) is missing age. One of the other ID numbers (150) is missing its demographics information, but the last ID number (101) has all information present. I could not find the data for participant 101, even looking back to the raw data.
+
+Do we have any experimental data that are not present in the demographics data?
+
+```{r}
+ids = d_demographics %>%
+  select(participant) %>%
+  unique() %>%
+  .$participant
+
+d %>%
+  filter(!participant %in% ids) %>%
+  select(participant) %>%
+  unique() %>%
+  .$participant
+
+rm(ids)
+```
+
+And we are not missing demographics data that are present in the experimental data.
+
+With that, we can now start to look at the demographics data. We will remove all of the demographics data that are not contributing to our final analyses for the data from experiment 1. As described before, this includes participants 3, 4, 5, 6, 7, 8, 9 as well as 101, 125, 141, and 150.
+
+```{r}
+ids = d %>%
+  select(participant) %>%
+  unique() %>%
+  .$participant
+
+# Age
+d_demographics %>%
+  filter(participant %in% ids) %>%
+  select(age) %>%
+  summarise(mean(age),
+            sd(age))
+
+# Gender
+#-- We didn't take into account non-binary gender :(
+d_demographics %>%
+  filter(participant %in% ids) %>%
+  select(gender) %>%
+  mutate(gender = recode(gender, "Female" = "female", "Male" = "male")) %>%
+  table()
+# .70 female
+
+# Education
+#-- These data were all collected from the UW undergraduate population
+d_demographics %>%
+  filter(participant %in% ids) %>%
+  select(highest_education) %>%
+  table()
+```
+
+## Analyses
+
+First, let's take a look at overall accuracy, just to get a sense of how participants performed.
+
+```{r}
+# Accuracy on emotion recognition
+d %>%
+  summarise(m_acc = mean(correct_recognized),
+            sd_acc = sd(correct_recognized))
+```
+
+In this experiment, we presented participants with the Geneva Emotion Recognition Task, shortened version (GERT-S). The GERT-S presents particpants with videos of actors expressing one of 14 different emotions. Participnats are tasked with labelling the emotion, provided with the 14 emotion category labels.
+
+We ran a binomial logistic regression with a maximal random effects structure to account for repeated observations of each item and each participant. We had two main *fixed effects*, along with their interaction: ART score (`cent_trans_ART`) to assess the role of long-term reding experience on emotion recognition and emotion type (`emotion_type`) to assess how complexity of the emotion impacted emotion recognition abilities. We cared mostly about their interaction. Given that complex emotion category labels are used in an emotive sense frequently in fiction, and the Author Recognition Test is thought to measure experience with fiction, one might expect higher scores on the ART to correspond to better recognition of complex emotions, specifically.
+
+Our random effects include a by-participant intercept (`participant`) and a by-item intercept (`emotion_video`) as well as a by-participant slope for each emotion type as well as a by-item slope for the ART score.
+
+All factors were centered, including the ART of participants being centered for each participant.
+
+```{r}
+m = glmer(correct_recognized ~ cent_trans_ART*emotion_type +
+            (1 + cent_trans_ART|emotion_video) + 
+            (1 + emotion_type|participant), 
+          data = d,
+          family = binomial)
+summary(m)
+Anova(m, type = 3)
+```
+
+We see a significant interaction between emotion type (Simple/Complex) and ART score, with the effect in the expected direction (that is, positive). However, somewhat surprisingly, we do not see an effect of ART score on performance. This is surprising given the previous studies which support this finding. We do have a relatively small sample size here (n = 134), so perhaps this is not so surprising.
+
+## Visualization
+
+### Descriptive trends
+
+Let's visualize these results by looking at responses for different ranges of ART scores for simple and complex emotions. In the following plot, we are visualizing the actual responses for simple and complex emotions. Each point represents the response of one participant for that category of emotions. We will also be including a descriptive line bootstrapped from the raw data to summarize the trend.
+
+```{r}
+participant_means = d %>%
+  group_by(participant, emotion_type_f, ART) %>%
+  summarise(correct_recognized = mean(correct_recognized),
+            recog_sd = sd(correct_recognized),
+            recog_se = se(correct_recognized))
+
+Fig2_exp1 = d %>%
+  ggplot(aes(x = ART, y = correct_recognized, group = 'emotion_type_f')) +
+  geom_jitter(data = participant_means, aes(x = ART, y = correct_recognized, group = 'emotion_type_f')) +
+  stat_smooth(method = 'gam', aes(group = 'emotion_type_f'), color = 'black') +
+  scale_y_continuous(limits = c(0.0, 1.0)) + 
+  scale_x_continuous(limits = c(0, 25), breaks = seq(0, 25, by = 5)) +
+  labs(x = "ART score", 
+       y = "Proportion correct", 
+       title = "Figure 2",
+       subtitle = "Experiment 1") +
+  facet_wrap(~emotion_type_f)
+Fig2_exp1
+
+filepath = paste(getwd(), "/Fig2_exp1.tiff", sep = "")
+ggsave(filename = filepath, 
+       plot = Fig2_exp1, 
+       device = "tiff", 
+       width = 174,
+       height = 139.2,
+       dpi = 600,
+       units = "mm")
+```
+
+### Model predictions
+
+We might also be interested in model predictions. We want the predictions to span the range of ART values on which we trained the model. To make this easier to plot, we are going to train a second model specifically for plotting. It's functionally the same -- ART is just scaled differently.
+
+```{r}
+m_vis = glmer(correct_recognized ~ ART*emotion_type + 
+              (1 + ART|emotion_video) + 
+              (1 + emotion_type|participant), 
+          data = d, 
+          family = binomial)
+summary(m_vis)
+Anova(m_vis, type = 3)
+```
+
+And then now that this model is trained we can generate predictions.
+
+```{r}
+d_predictions = expand.grid(ART = seq(0, 25, by = 0.1), 
+                            emotion_type_f = c("Simple", "Complex")) %>%
+  mutate(emotion_type = recode(emotion_type_f, "Simple" = -0.5, "Complex" = 0.5))
+
+d_predictions$correct_recognized = predict(m_vis, 
+                                           d_predictions,
+                                           type = "response",
+                                           re.form = NA)
+```
+
+And visualize the data.
+
+```{r}
+d %>%
+  group_by(participant, emotion_type_f, ART) %>%
+  summarise(recog_m = mean(correct_recognized),
+            recog_sd = sd(correct_recognized),
+            recog_se = se(correct_recognized)) %>%
+  ggplot(aes(x = ART, y = recog_m)) +
+  geom_jitter() +
+  geom_line(data = d_predictions, aes(x = ART, 
+                                      y = correct_recognized)) +
+  facet_wrap(~emotion_type_f) +
+  scale_y_continuous(limits = c(0.0, 1.0)) + 
+  scale_x_continuous(breaks = seq(0, 25, by = 5)) +
+  labs(x = "ART score", 
+       y = "Proportion correct", 
+       title = "Figure 2",
+       subtitle = "Experiment 1: Raw participants data and model predictions split by emotion type")
+
+# Any warning is because some of the predictions go over 1.0; this is a function 
+# of the ART scores going slightly over what the model was trained on.
+```

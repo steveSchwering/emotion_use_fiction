@@ -1,0 +1,523 @@
+---
+title: "emot_fic_corpus_analyses"
+author: "Steve Schwering"
+date: "6/12/2020"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggrepel) # Helpful for visualizing. Needed for bar plots.
+library(psych)
+```
+
+Emotion category labels and their contexts were extracted from the COCA corpus (scripts not documented here). Following extraction, two research assistants read the extracted text (column name of `context`) and made a judgment on the emotiveness of the target word. The rating is recorded in the `emotionContent` column. The following markdown file documents the analysis of this corpus data.
+
+First, we start by reading in the data.
+
+```{r}
+setwd("~/Documents/Psychology/Labs/LCNL/Research/current/emotion_fiction/paper/data_analyses/corpus")
+d = read_csv('corpus_analyses_full_formatted.csv')
+
+sample_n(d, 10)
+```
+
+Let's check for any errors in the analyses. The `emotion_content_ra` variable should have a value of 0, corresponding to an alternative sense of the emotion category label, or a value of 1, corresponding to an emotive use of the emotion category label. Values other than 1 or 0 were used when the coders felt the emotive content of the emotion category label was ambiguous. These cases were examined by one experimenter (Steve) who made a judgment as to the emotion content of that category label. The final encoding is docmented in the variable `emotion_content_check`. Some contexts were deemed to be erroneous and given an NA code. These erroneous contexts were excluded from analyses.
+
+Examples of each of emotive contexts (1's), non-emotive contexts (0's), and erroneous contexts (NAs) are printed. Some contexts that were deemed ambiguous by the original coders are are printed.
+
+```{r}
+d %>%
+  group_by(emotion_content_ra) %>%
+  tally()
+
+# 1 indicates an emotive context
+d %>%
+  filter(emotion_content_ra == 1) %>%
+  group_by(lemma) %>%
+  select(context) %>%
+  sample_n(1)
+
+# 0 indicates a non-emotive context
+d %>%
+  filter(emotion_content_ra == 0) %>%
+  group_by(lemma) %>%
+  select(context) %>%
+  sample_n(1)
+
+# We have a total of 65 cases that RAs had deemed ambiguous
+d %>%
+  filter(emotion_content_ra == 2) %>%
+  select(context) %>%
+  sample_n(10)
+# Some are erroneous, others ambiguous
+
+# These were recoded by Steve
+#-- The remaining NAs are the ambiguous cases
+d %>%
+  group_by(emotion_content_check) %>%
+  tally()
+```
+
+We have a total of 14,843 cases deemed as emotive and 5,307 cases deemed non-emotive. There were a total of 22 cases that were extracted in an erroneous or problematic fashion. I do not see any strong trend in these erroneous cases, so they are going to be removed.
+
+```{r}
+d_coded = d %>%
+  filter(emotion_content_check %in% c(0, 1))
+```
+
+## Counts of emotive contexts
+
+We care about analyzing our simple and complex emotions:
+
+```{r}
+simple_emotions = c('anger',
+                    'joy',
+                    'surprise',
+                    'disgust',
+                    'sadness',
+                    'fear')
+
+complex_emotions = c('amusement',
+                     'despair',
+                     'relief',
+                     'anxiety',
+                     'pleasure',
+                     'irritation',
+                     'interest',
+                     'pride')
+```
+
+Now, we need to format the data frame to organize the corpus into a way we can analyze.
+
+```{r}
+complexity_levels = c("Simple", "Complex")
+
+d_coded = d_coded %>%
+  mutate(emotion_complexity = ifelse(lemma %in% simple_emotions, -0.5, 0.5),
+         emotion_complexity_f = as.factor(ifelse(lemma %in% simple_emotions, 
+                                                 "Simple", 
+                                                 "Complex"))) %>%
+  mutate(emotion_complexity_f = fct_relevel(emotion_complexity_f,
+                                            complexity_levels)) %>%
+  mutate(emotion_content_f = as.factor(emotion_content_check),
+         emotion_content_f = recode(emotion_content_f, 
+                                    "0" = "Non-emotive", 
+                                    "1" = "Emotive")) %>%
+  mutate(corpus_subset = ifelse(type == 'Fiction', 0.5, -0.5))
+```
+
+### Treatment of emotions by corpus genre
+
+First, let's examine how emotion category labels are used in different corpus genres. We will first conduct this analysis without breaking down emotions any further, so we are getting a very general picture about how different types of text treat emotions.
+
+```{r}
+d_coded %>%
+  group_by(kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check))
+```
+
+```{r}
+d_coded %>% 
+  ggplot(aes(x = kind, 
+             fill = emotion_content_f)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of category", 
+       title = "Proportion of tokens coded emotive or not by corpus genre", 
+       fill = "Emotive content")
+```
+
+We can see that Fiction uses emotion category labels most often in an emotive sense. Spoken and Other corpora do not treat emotion category labels in an emotive sense as frequently.
+
+### Treatment of emotions by emotion type
+
+Next, we want to examine the effect of emotion type on the treatment of emotion category labels. That is, we are going to examine the use of the emotion category labels based on whether they describe a "simple" or a "complex" emotion.
+
+```{r}
+d_coded %>%
+  group_by(emotion_complexity_f) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check))
+```
+
+```{r}
+d_coded %>% 
+  ggplot(aes(x = emotion_complexity_f, 
+             fill = emotion_content_f)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of category", 
+       title = "Proportion of tokens coded emotive or not by emotion type", 
+       fill = "Emotive content")
+```
+
+Complex emotions are not used in an emotive sense as frequently as simple emotions.
+
+### Treatment of simple and complex emotions by corpus genre
+
+Now, let's combine these two analyses. We want to see how Simple and Complex emotions are treated differently in different corpus genres. This means that we want to see the intersection of corpus genre (Fiction language, Spoken language, and Other language) and emotion type (Simple, Complex).
+
+```{r}
+d_coded %>%
+  group_by(emotion_complexity_f, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check))
+```
+
+```{r}
+Fig1 = d_coded %>% 
+  ggplot(aes(x = kind, 
+             fill = emotion_content_f)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~emotion_complexity_f) +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of emotion content", 
+       title = "Figure 1", 
+       subtitle = "Proportion of simple and complex emotions coded emotive or not by corpus genre",
+       fill = "Emotive content") +
+  scale_fill_branded(target = "Lilac") +
+  theme(panel.background = element_rect(fill = "white",
+                                        color = "white"),
+        plot.background = element_rect(fill = "white",
+                                       color = "white"))
+Fig1
+
+filepath = paste(getwd(), "/Fig1.tiff", sep = "")
+ggsave(filename = filepath,
+       plot = Fig1,
+       device = "tiff",
+       width = 176,
+       height = 140,
+       dpi = 300,
+       units = "mm")
+```
+
+We can see that complex emotions are used in an emotive sense quite often in Fiction but not so much in Spoken and Other corpus genres. Simple emotions, on the other hand, are used in an emotive sense across all corpus genres.
+
+This reinforces the earlier analyses but gives a slightly different perspective. Complex emotions are, overall, less likely to be used in an emotive sense than Simple emotions. This is most pronounced for two of our corpus genres, Spoken language and Other language. Fiction language, on the other hand, used Complex emotions in an emotive sense quite often. This suggests that fiction is a particularly good source of emotion category label information for Complex emotions -- a characteristic that is lacking from other corpus genres. Simple emotion category labels, on the other hand, are used in an emotive sense at high rates across all corpus genres.
+
+### Model: Are emotive ratings greater for complex emotions in fiction over other corpus genres
+
+We are interested in predicting emotive ratings (0, 1) from emotion type (-0.5 = Simple, 0.5 = Complex) and corpus subset (-0.5 = non-fiction, 0.5 = fiction). Fiction should have higher emotive ratings than other corpora, at least for complex emotions. This means we are expecting an interaction between the two factors. Fiction was coded as a binary variable because we specifically care how fiction texts compare to other texts; the pattern differences between other corpora and spoken corpora are not of interest.
+
+```{r}
+m_corp = glmer(emotion_content_check ~ 
+                 emotion_complexity + 
+                 corpus_subset + 
+                 emotion_complexity:corpus_subset +
+                 (1|target),
+               data = d_coded, 
+               family = binomial)
+summary(m_corp)
+Anova(m_corp, type = 3)
+```
+
+All three effects are significant. Note, including by-emotion random slopes fails to converge, likely due to the fact that only a few datapoints are available for each emotion in each corpus genre. Nevertheless, the model shows exactly the strong effects that would be expected. 
+
+### Breaking down emotive use for each emotion
+
+Now, let's take the time to look at the use of each emotion category label.
+
+```{r}
+props = d_coded %>%
+  group_by(emotion_complexity_f, lemma) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check)) %>%
+  arrange(emotive_prop)
+props
+
+props %>%
+  write_csv(path = "./emotion_prop_emotive.csv",
+            col_names = TRUE)
+```
+
+```{r}
+d_point_simple = props %>%
+  filter(emotion_complexity_f == "Simple")
+d_point_complex = props %>%
+  filter(emotion_complexity_f == "Complex")
+
+props %>%
+  ggplot(aes(x = emotion_complexity_f, y = emotive_prop)) +
+  geom_bar(stat = "summary", width = 0.25) +
+  geom_text_repel(
+    data = d_point_complex,
+    aes(x = emotion_complexity_f, 
+        y = emotive_prop, 
+        label = lemma),
+    force = 10,
+    nudge_x = -0.3,
+    direction = "y",
+    segment.size = 0.3,
+    fontface = "bold",
+    size = 4.5) +
+  geom_text_repel(
+    data = d_point_simple,
+    aes(x = emotion_complexity_f, 
+        y = emotive_prop, 
+        label = lemma),
+    force = 10,
+    nudge_x = 0.3,
+    direction = "y",
+    segment.size = 0.3,
+    fontface = "bold",
+    size = 4.5) +
+  labs(x = "Emotion complexity",
+       y = "Proportion rated emotive",
+       title = "Proportion emotive rating by type")
+
+rm(d_point_simple); rm(d_point_complex); rm(props)
+```
+
+Of note, we see that *relief*, *interest*, *amusement*, and *irritation* are particularly non-emotive. The first three are words that have mixed use or are used in ways that are not directly related to emotive experience. For example, *relief* may refer to a "relief fund", *interest* may refer to "interest rates", and *amusement* may refer to an "amusement park." 
+
+Looking down the list, *joy* also has mixed use, likely as an individual's name. *Pride* and *anxiety* follow, with *pride* potentially referring to groups.
+
+Often, there are edge cases that are related to the emotive experience but are not directly about the emotion. For example pride has come to refer to an event (e.g. pride month). As much as this is inspired by the emotion, the event is also a thing unto itself, which may or may not be directly associated with the emotive experience.
+
+Now, we also care about how these emotion category labels are used across corpus genres. Here, we have encoded that information in the `kind` variable. First, let's look at the use of emotion category labels in Fiction texts.
+
+```{r}
+d_coded %>%
+  filter(kind == 'Fiction') %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check)) %>%
+  arrange(emotive_prop)
+```
+
+We can see that emotion category labels are used consistently in an emotive sense in fiction texts. There is  slight decrement for complex emotions, but nothing particularly stark. Now, looking at Spoken text.
+
+```{r}
+d_coded %>%
+  filter(kind == 'Spoken') %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check)) %>%
+  arrange(emotive_prop)
+```
+
+We can see that the emotion category labels are not used in emotive sense nearly as often. This appears to be especially true for emotion category labels described as Complex. *Amusement*, *relief*, *interest*, and *irritation* are used in non-emotive sense quite often. The word *joy*, described as a Simple emotion, is also used often in a non-emotive sense. Do note that some of the counts in these categories (e.g. for *irritation*) are quite low.
+
+Finally, let's take a look at Other texts, which includes news and academic writing.
+
+```{r}
+d_coded %>%
+  filter(kind == 'Other') %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n(),
+            emotive_se = se(emotion_content_check)) %>%
+  arrange(emotive_prop)
+```
+
+## Supplementary analyses: Differences by raters
+
+Do these ratings differ by rater? Each rater only got a subset of the entire corpus, as no attempt was made to divide the corpus evenly among raters, keeping counts for each genre and lemma equal.
+
+```{r}
+d_coded %>%
+  filter(coder_num == 1) %>%
+  filter(emotion_complexity_f == "Complex") %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n()) %>%
+  arrange(lemma)
+
+d_coded %>%
+  filter(coder_num == 1) %>%
+  filter(emotion_complexity_f == "Simple") %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n()) %>%
+  arrange(lemma)
+
+d_coded %>% 
+  filter(coder_num == 1) %>%
+  ggplot(aes(x = kind, 
+             fill = emotion_content_f)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~emotion_complexity_f) +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of category", 
+       title = "Proportion of tokens coded emotive or not by corpus genre", 
+       fill = "Emotive content")
+```
+
+This coder seems to rate the complex and simple emotions roughly the same given the plot, but looking at the counts across categories, this rater does not seem to have rated many simple emotions in the Other and Spoken genres. I do not think reading too much into this difference is important.
+
+```{r}
+d_coded %>%
+  filter(coder_num == 2) %>%
+  filter(emotion_complexity_f == "Complex") %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n()) %>%
+  arrange(lemma)
+
+d_coded %>%
+  filter(coder_num == 2) %>%
+  filter(emotion_complexity_f == "Simple") %>%
+  group_by(emotion_complexity_f, lemma, kind) %>%
+  summarise(total_count = n(),
+            emotive_count = sum(emotion_content_check),
+            emotive_prop = sum(emotion_content_check) / n()) %>%
+  arrange(lemma)
+
+d_coded %>% 
+  filter(coder_num == 2) %>%
+  ggplot(aes(x = kind, 
+             fill = emotion_content_f)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~emotion_complexity_f) +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of category", 
+       title = "Proportion of tokens coded emotive or not by corpus genre", 
+       fill = "Emotive content")
+```
+
+The other rater made more ratings, overall, and they rated a slightly different portion of the corpus.
+
+## Reliability check
+
+We want to be sure that the corpus analyses we conducted were reliable, so one research assistant who had not conducted the original corpus analyses was given a sample of the originally coded text. The responses of that research assistant can be found in this data frame.
+
+```{r}
+d_reliability = read_csv('corpus_analyses_reliability_check_error_corrected.csv') %>%
+  mutate(reliability_emotion_content_f = fct_rev(as.factor(reliability_emotion_content)),
+         reliability_emotion_content_f = recode(reliability_emotion_content, 
+                                                "0" = "Non-emotive", 
+                                                "1" = "Emotive"))
+
+head(d_reliability)
+```
+
+```{r}
+d_check_reliability = d_reliability %>%
+  select(c(context, 
+           reliability_emotion_content, 
+           reliability_emotion_content_f)) %>%
+  left_join(d_coded, by = "context") %>%
+  mutate(emotion_content_match = if_else(emotion_content_check == reliability_emotion_content, 1, 0))
+```
+
+Let's first just look at the average match.
+
+```{r}
+d_check_reliability %>%
+  summarise(prop_emotion_content_match = mean(emotion_content_match))
+```
+
+We have an average agreement between the original coders and the third, additional coder of `.81`. In graph form this translates to a a difference between simple and complex emotions that looks like the following:
+
+```{r}
+d_check_reliability %>% 
+  ggplot(aes(x = kind, 
+             fill = reliability_emotion_content_f)) +
+  geom_bar(position = "fill") +
+  facet_wrap(~emotion_complexity_f) +
+  scale_y_continuous(labels = c(0.00, 0.25, 0.50, 0.75, 1.00),
+                     expand = c(0, 0)) +
+  scale_x_discrete() +
+  labs(x = "Corpus subset", 
+       y = "Proportion of category", 
+       title = "Proportion of simple and complex emotions coded emotive or not by corpus genre", 
+       fill = "Emotive content")
+```
+
+The colors here are reversed, but the trend is the same.
+
+We can look at Cohen's Kappa to moe precisely analyze inter-rater reliability. To get a measure of Cohen's Kappa, we need to create a matrix where each rater is a column, and each row is an observation being judged.
+
+First, I extract the ratings that are in common, and then I format them to calculate inter-rater reliability using Cohen's Kappa through the `cohen.kappa` function from the `psych` package. The `cohen.kappa` function requires the raters to be column names with each rating in a different row.
+
+```{r}
+shared_contexts = d_check_reliability$context
+
+d_wide_reliability = d %>%
+  filter(context %in% shared_contexts) %>%
+  select(c(context, coder_num, emotion_content_check)) %>%
+  pivot_wider(names_from = coder_num, 
+              values_from = emotion_content_check, 
+              names_prefix = "rater")
+
+d_cohen_reliability = d_check_reliability %>%
+  select(c(context, reliability_emotion_content)) %>%
+  rename(rater3 = reliability_emotion_content)
+
+# Cleanup
+rm(d_check_reliability)
+```
+
+In the following, we calculate Cohen's kappa separately for rater 1 with rater 3 and for rater 2 with rater 3. There was no overlap between what rater 1 and rater 2 coded, so there is no kappa score.
+
+```{r}
+cohen_kappa_df_rater1 = d_wide_reliability %>%
+  filter(!is.na(rater1)) %>%
+  select(context, rater1) %>%
+  left_join(d_cohen_reliability, by = c('context')) %>%
+  select(rater1, rater3)
+
+rater1 = cohen_kappa_df_rater1$rater1
+rater3 = cohen_kappa_df_rater1$rater3
+
+cohen.kappa(x = cbind(rater1, rater3))
+
+# Cleanup
+rm(cohen_kappa_df_rater1); rm(rater1); rm(rater3)
+```
+
+So, we have very good inter-rater reliability. A kappa value of .77 estimated from this data is solidly in the substantial agreement range.
+
+```{r}
+cohen_kappa_df_rater2 = d_wide_reliability %>%
+  filter(!is.na(rater2)) %>%
+  select(context, rater2) %>%
+  left_join(d_cohen_reliability, by = c('context')) %>%
+  select(rater2, rater3)
+
+rater2 = cohen_kappa_df_rater2$rater2
+rater3 = cohen_kappa_df_rater2$rater3
+
+cohen.kappa(x = cbind(rater2, rater3))
+
+# Cleanup
+rm(cohen_kappa_df_rater2); rm(rater2); rm(rater3); rm(d_cohen_reliability)
+```
+
+We have worse agreement between rater 2 and rater 3, though it is not necessarily poor agreement. A kappa value of .33 estimated from this data is within the fair agreement range.

@@ -1,0 +1,434 @@
+---
+title: "experiment_2_analyses"
+author: "Steve Schwering"
+date: "6/19/2020"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(lme4)
+```
+
+```{r}
+setwd("~/Documents/Psychology/Labs/LCNL/Research/current/emotion_fiction/paper/data_analyses/experiment_2")
+d = read_csv("experiment_2_data.csv")
+```
+
+Our data in this experiment is in a slightly different format, as I had greater control over the formatting from the start. The `experiment_2_data.csv` file is scrubbed from the `ART_GERT_MTurk_400.csv` file using `experiment_2_scrub.py`.
+
+This experiment was also [https://osf.io/jc95w](pre-registered on OSF) which detail our new statistical controls to ensure attention to the task. This new dataset was collected on a wider range of participants from Mechanical Turk, so we wanted to ensure that they could pay attention. Participants were requested to wear headphones, though there was no way to check for this. However, we did require participants to complete an audio check prior to beginning the task, so we have some confidence that participants were actually able to hear the videos.
+
+All this goes to say that we have some additional checks and formatting to do with the data from experiment 2.
+
+Let's get a sense of the data:
+
+As a tidy dataframe...
+
+```{r}
+sample_n(d, 10)
+```
+
+And as a "glimpsed" dataframe...
+
+```{r}
+sample_n(d, 10) %>%
+  glimpse()
+```
+
+## Formatting
+
+I am going to change some variable names, etc. that were not done in the Python script, as it's easier to do it here.
+
+```{r}
+simple_emotions = c('Anger',
+                    'Joy', 
+                    'Surprise',
+                    'Disgust',
+                    'Sadness',
+                    'Fear')
+
+complex_emotions = c('Amusement',
+                     'Despair',
+                     'Relief',
+                     'Anxiety',
+                     'Pleasure',
+                     'Irritation',
+                     'Interest',
+                     'Pride')
+```
+
+### Basic transformations
+
+```{r}
+d = d %>%
+  mutate(correct_recognized = ifelse(response == target_emotion, 1, 0),
+         GERT_ave = ave(correct_recognized, participant_id))
+```
+
+### Checks and participant exclusions
+
+According to our pre-registration, participants were slated to be excluded if they responded randomly. We defined this as fulfilling the two criteria:
+
+* 1. Failing *at least* one attention check
+* 2. Either scoring below 1 on the ART or scoring below .145 on the GERT
+
+We had two attention checks: one during the ART (`ART_attention` = 1 if passed) and one during the definition matching task at the end (`definition_attention` = 1 if passed). 
+
+We had an initial sample size of 400 participants. These checks will remove 13 participants.
+
+```{r}
+length(unique(d$participant_id))
+```
+
+```{r}
+d = d %>%
+  mutate(fail_one_attention = ifelse(((ART_attention == 0) | (definition_attention == 0)), 1, 0)) %>%
+  mutate(responding_one_random = ifelse(((ART < 1) + (GERT_ave < .145)), 1, 0)) %>%
+  filter(fail_one_attention == 0 | responding_one_random == 0)
+```
+
+```{r}
+length(unique(d$participant_id))
+```
+
+### Transforming ART score and other formatting
+
+First, we need ot note that some ART scores are below 0. This will cause a problem with our transformation (rooting), so we need to add a constant to the scores to being them above 0.
+
+```{r}
+describe(d$ART)
+
+const_ART = 5.001
+```
+
+```{r}
+d = d %>%
+  # Mutations:
+  # -- Score responses
+  # -- Transform and center ART scores
+  # -- Get participant's average GERT score
+  # -- Collapse emotions into complexity
+  # -- Factorize emotions
+  # -- Factorize target video and participant ID
+  mutate(mod_ART = ART + const_ART,
+         trans_ART = sqrt(mod_ART),
+         cent_trans_ART = trans_ART - ave(trans_ART),
+         emotion_type = ifelse(target_emotion %in% simple_emotions, -0.5, 0.5),
+         emotion_type_f = as.factor(ifelse(target_emotion %in% simple_emotions, 
+                                           "Simple", 
+                                           "Complex")),
+         emotion_type_f = factor(emotion_type_f, levels = c("Simple", "Complex")),
+         target_video_num = as.factor(target_video_num),
+         participant_id = as.factor(participant_id),
+         gender_num = recode(gender, "Female" = -0.5, "Male" = 0.5, .default = 0))
+```
+
+```{r}
+describe(d$cent_trans_ART)
+```
+
+## Demographics
+
+We collected data on participant age, gender, race, and education. Let's get a sense of who completed the task.
+
+```{r}
+# Age
+d %>%
+  select(age) %>%
+  summarise(mean(age),
+            sd(age))
+```
+
+```{r}
+# Gender
+d %>%
+  select(participant_id, gender) %>%
+  unique() %>%
+  select(gender) %>%
+  table()
+
+195 / (195 + 3 + 177 + 1)
+```
+
+```{r}
+# Education
+d %>%
+  select(participant_id, education) %>%
+  unique() %>%
+  select(education) %>%
+  table()
+```
+
+```{r}
+# Race
+d %>%
+  select(participant_id, race) %>%
+  unique() %>%
+  select(race) %>%
+  table()
+```
+
+We have a much more diverse population in this sample than in our initial sample.
+
+## Data analysis
+
+Again, let's get an idea of how participants performed, overall.
+
+```{r}
+d %>%
+  summarise(m_acc = mean(correct_recognized),
+            sd_acc = sd(correct_recognized))
+```
+
+We are running the same model as in Experiment 1.
+
+```{r}
+m = glmer(correct_recognized ~ 1 + 
+            cent_trans_ART + 
+            emotion_type +
+            cent_trans_ART:emotion_type +
+            (1 + cent_trans_ART|target_video_num) + 
+            (1 + emotion_type|participant_id), 
+          data = d, 
+          family = binomial)
+summary(m)
+Anova(m, type = 3)
+```
+
+Effect of ART score is strongly significant, effect of emotion type and interaction non-significant. Overall effect of long-term experience confirmed, but no difference between groups.
+
+## Visualization
+
+### Descriptive
+
+As with Experiment 1, let's visualize participant responses and a general trend line. First, we will take a look at raw participant responses.
+
+```{r}
+participant_means = d %>%
+  group_by(participant_id, emotion_type_f, ART) %>%
+  summarise(correct_recognized = mean(correct_recognized),
+            recog_sd = sd(correct_recognized),
+            recog_se = se(correct_recognized))
+
+Fig2_exp2 = d %>%
+  ggplot(aes(x = ART, y = correct_recognized, group = 'emotion_type_f')) +
+  geom_jitter(data = participant_means, aes(x = ART, y = correct_recognized, group = 'emotion_type_f')) +
+  stat_smooth(method = 'gam', aes(group = 'emotion_type_f'), color = 'black') +
+  scale_y_continuous(limits = c(0.0, 1.0)) + 
+  scale_x_continuous(breaks = seq(-10, 40, by = 5)) +
+  labs(x = "ART score", 
+       y = "Proportion correct", 
+       title = "",
+       subtitle = "Experiment 2") +
+  facet_wrap(~emotion_type_f)
+Fig2_exp2
+
+filepath = paste(getwd(), "/Fig2_exp2.tiff", sep = "")
+ggsave(filename = filepath,
+       plot = Fig2_exp2,
+       device = "tiff",
+       width = 174,
+       height = 139.2,
+       dpi = 600,
+       units = "mm")
+```
+
+Now, for saving Figure 2 in the manuscript, we want to combine the two Figures into 1
+
+```{r}
+library(cowplot)
+
+Fig2 = plot_grid(Fig2_exp1, Fig2_exp2)
+Fig2
+
+filepath = paste(getwd(), "/Fig2.tiff", sep = "")
+ggsave(filename = filepath,
+       plot = Fig2,
+       device = "tiff",
+       width = 348,
+       height = 139.2,
+       dpi = 600,
+       units = "mm")
+```
+
+### Model predictions
+
+As before, we want to look at a range of ART scores.
+
+```{r}
+describe(d$ART)
+# Minimum: -5
+# Maximum: 37
+
+describe(d$cent_trans_ART)
+# Minimum: -3.71
+# Maximum: 2.74
+```
+
+We would like to plot the visualization as similarly to the previous one as possible. Unforuntately, the two models are trained on different ranges of ART scores. As before, we will be visualizing with raw ART scores starting at 0.
+
+```{r}
+m_vis = glmer(correct_recognized ~ 1 + 
+              ART + 
+              emotion_type +
+              ART:emotion_type + 
+              (1 + ART|target_video_num) + 
+              (1 + emotion_type|participant_id), 
+          data = d, 
+          family = binomial)
+summary(m_vis)
+Anova(m_vis, type = 3)
+```
+
+```{r}
+d_predictions = expand.grid(ART = seq(-5, 40, by = 0.01), 
+                            emotion_type_f = c("Simple", "Complex")) %>%
+  mutate(emotion_type = recode(emotion_type_f, "Simple" = -0.5, "Complex" = 0.5))
+d_predictions$correct_recognized = predict(m_vis, 
+                                           d_predictions,
+                                           type = "response",
+                                           re.form = NA)
+```
+
+```{r}
+d %>%
+  group_by(participant_id, emotion_type_f, ART) %>%
+  summarise(recog_m = mean(correct_recognized),
+            recog_sd = sd(correct_recognized),
+            recog_se = se(correct_recognized)) %>%
+  ggplot(aes(x = ART, y = recog_m)) +
+  geom_jitter() +
+  geom_line(data = d_predictions, aes(x = ART, 
+                                      y = correct_recognized)) +
+  facet_wrap(~emotion_type_f) +
+  scale_y_continuous(limits = c(0.0, 1.0)) + 
+  scale_x_continuous(breaks = seq(-10, 40, by = 5)) +
+  labs(x = "ART score", 
+       y = "Proportion correct", 
+       title = "Figure 2",
+       subtitle = "Experiment 2: Raw participants data and model predictions split by emotion type")
+
+# We extend to -10 on the x-axis to allow visualization of one data point that
+# would be clipped if the limit was set to -5
+```
+
+## Exploratory analyses
+
+We had a few exploratory analyses listed in the pre-registration that we wanted to complete.
+
+### Beyond simple and complex: Emotion recognition
+
+Different emotions are used in different senses across fiction. By collapsing into simple and complex, we may be ignoring quite a bit of interesting variability between emotion terms within the corpus. Let's look at plots of the data for each type of emotion.
+
+```{r}
+d %>%
+  group_by(participant_id, target_emotion, ART, emotion_type_f) %>%
+  summarise(recog_m = mean(correct_recognized),
+            recog_sd = sd(correct_recognized),
+            recog_se = se(correct_recognized)) %>%
+  ggplot(aes(x = ART, y = recog_m, color = emotion_type_f)) +
+  geom_jitter() +
+  labs(x = "ART score", 
+       y = "Proportion correct", 
+       title = "Proportion correct",
+       color = "Complexity") +
+  facet_wrap(~target_emotion)
+```
+
+We see that there are some differences in how these emotions are recognized. Looking at the complex emotions, we can see these triangle shapes in the data in which participants with lower ART scores have a wide range of accuracy in recognizing emotions, but participants with higher ART scores are better at recognizing emotions, overall. I may be reading too much into the data, but there also appears to be differences between different kinds of emotions. this triangle is most visible for amusement, anger, interest, irritation, joy, pleasure, and somewhat for relief.
+
+```{r}
+d_props = read_csv("emotion_prop_emotive.csv")
+
+d_props
+```
+
+Can we tap into these differences between emotions by including the emotive proportion in our analyses en lieu of "simple" and "complex" definitions?
+
+First, we join the dataframes...
+
+```{r}
+d_prop_joined = d %>%
+  mutate(target_emotion_l = str_to_lower(target_emotion)) %>%
+  left_join(d_props, by = c("target_emotion_l" = "lemma")) %>%
+  mutate(cent_emotive_prop = emotive_prop - ave(emotive_prop))
+```
+
+we can then try to predict recognition of an emotion from a participant's ART score as well as the probability of an emotion being used in an emotive sense. If participants with higher ART scores are more sensitive to the distributional statistics with which a word is used, then a participant's ART score should interact with the proportion of times the word is used in an emotive sense.
+
+```{r}
+m_prop = glmer(correct_recognized ~ 1 + 
+                 cent_trans_ART +
+                 emotive_prop +
+                 cent_trans_ART:emotive_prop +
+                 (1 + cent_trans_ART|target_video_num) + 
+                 (1 + emotive_prop|participant_id), 
+          data = d_prop_joined, 
+          family = binomial)
+summary(m_prop)
+```
+
+We do find an effect of ART score and an effect of the number of times a word is used in an emotive sense (with a negative slope! though interpret this with caution). However, we find no interaction between the two; differences in ART score do not predict sensitivity to the proportion of times a word is used in an emotive sense.
+
+### Definitions and ART scores
+
+Do participant ART scores correspond to the number of definitions they got correct?
+
+```{r}
+d_part_def_ART = d %>%
+  select(participant_id, 
+         simple_definitions_correct, 
+         complex_definitions_correct,
+         ART,
+         trans_ART,
+         cent_trans_ART,
+         GERT_ave) %>%
+  unique()
+```
+
+```{r}
+m_simp = lm(simple_definitions_correct ~ ART, data = d_part_def_ART)
+summary(m_simp)
+
+m_complex = lm(complex_definitions_correct ~ ART, data = d_part_def_ART)
+summary(m_complex)
+```
+
+Both are related. Of course, this could simply be due to the fact that participants who are good at one task or who pay attention to one task are going to succeed at every task because of general capabilities. In other words, this might not be specific to the role of language experience, but it's at least consistent.
+
+### More restrictive exclusion critera
+
+Our exclusion criteria was pretty lenient. Here, I am going to cut off more participants -- ones who had a negative value on the ART OR participants who were below chance on the GERT OR participants who failed one attention check
+
+```{r}
+d_exclus = d %>%
+  filter(fail_one_attention != 1) %>%
+  filter(responding_one_random != 1)
+
+length(unique(d_exclus$participant_id))
+```
+
+With this restrictive exclusion criteria we cut a little over a fifth of our sample.
+
+We now need to recenter our ART scores.
+
+```{r}
+d_exclus = d_exclus %>%
+  mutate(cent_trans_ART = trans_ART - ave(trans_ART))
+```
+
+```{r}
+m = glmer(correct_recognized ~ 1 + 
+            cent_trans_ART + 
+            emotion_type +
+            cent_trans_ART:emotion_type + 
+            (1 + cent_trans_ART|target_video_num) + 
+            (1 + emotion_type|participant_id), 
+          data = d, 
+          family = binomial)
+summary(m)
+Anova(m, type = 3)
+```
+
+We get essentially the same findings as before.
