@@ -10,3 +10,5 @@ Analyses generating this figure can be found in the file `emot_fic_corpus_analys
 Then, we looked at whether people who read more were better able to recognize the emotions used in fiction more often than people who read less. Analyses of our results can be found in the files `experiment_1_analyses.Rmd` and `experiment_2_analyses.Rmd`.
 
 You can find a write-up of those results [here in Affective Science](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9382981/).
+
+A continuation of this project looking at how emotion category labels are used in child-directed speech can be found [here](https://github.com/steveSchwering/emot_fic_child_corpus/tree/main) (we didn't find any differences, but I think there's some promise to look more!).
